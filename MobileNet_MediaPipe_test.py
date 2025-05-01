@@ -3,10 +3,8 @@ import mediapipe as mp
 import serial
 import time
 import math
-import threading
 from playsound import playsound
-
-
+import threading
 
 # ─────────────────────────────────────────────
 # Serial communication with Arduino
@@ -54,33 +52,23 @@ def count_total_fingers(hand_landmarks):
     tip_ids = [4, 8, 12, 16, 20]
     return sum(hand_landmarks.landmark[tip].y < hand_landmarks.landmark[tip - 2].y for tip in tip_ids[1:])
 
-# ⬇️ Add is_rock_out here:
 def is_rock_out(hand_landmarks):
-    """
-    Detects the 'rock out' hand sign:
-    - Pinky and index fingers up
-    - Middle and ring fingers down
-    """
     def is_up(tip, pip):
         return hand_landmarks.landmark[tip].y < hand_landmarks.landmark[pip].y
-
     index_up = is_up(8, 6)
     middle_down = hand_landmarks.landmark[12].y > hand_landmarks.landmark[10].y
     ring_down = hand_landmarks.landmark[16].y > hand_landmarks.landmark[14].y
     pinky_up = is_up(20, 18)
-
     return index_up and pinky_up and middle_down and ring_down
 
 def play_song_background():
     global is_playing
     is_playing = True
-    playsound('/home/owen/aiTankProj/songs/you_look_like_you_love_me.mp3') # change songs here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    playsound('/home/owen/aiTankProj/songs/womanizer.mp3')
     is_playing = False
 
-
-
-
-# ───────────────────────────────────────────── GLOBALS
+# ─────────────────────────────────────────────
+# Globals
 last_command = None
 last_switch_time = 0
 switch_cooldown = 2
@@ -88,16 +76,11 @@ switch_candidate_idx = None
 switch_hold_frames = 0
 required_hold_frames = 15
 target_idx = None
-# Rockout gesture tracking
 rockout_count = 0
 last_rockout_time = 0
-rockout_cooldown = 5  # seconds
-is_playing = False
-
-
-
-# Proximity threshold (pixels)
+rockout_cooldown = 5
 close_threshold = 450
+is_playing = False
 
 # ─────────────────────────────────────────────
 # Main loop
@@ -145,7 +128,10 @@ while True:
         offset_x = 0
         target_height = 0
 
-    hand_map = {i: {"fist": 0, "open": 0, "one_finger": 0, "five_fingers": 0, "total_hands": 0} for i in range(len(person_boxes))}
+    hand_map = {
+        i: {"fist": 0, "open": 0, "one_finger": 0, "five_fingers": 0, "total_hands": 0, "raised_hands": 0}
+        for i in range(len(person_boxes))
+    }
 
     results = hands.process(frame_rgb)
     if results.multi_hand_landmarks:
@@ -166,16 +152,17 @@ while True:
                     closest_idx = idx
 
             if closest_idx is not None:
-                hand_map[closest_idx]["total_hands"] += 1
-                hand_map[closest_idx]["fist"] += int(is_fist(handLms))
-                hand_map[closest_idx]["open"] += int(not is_fist(handLms))
-                hand_map[closest_idx]["one_finger"] += int(count_raised_fingers(handLms) == 1)
-                hand_map[closest_idx]["five_fingers"] += int(count_total_fingers(handLms) == 5)
-            
-                # Detect rock out gesture (not assigned to any person here)
+                head_y = (person_boxes[closest_idx][1] + person_boxes[closest_idx][3]) / 2
+                if hand_y < head_y:
+                    hand_map[closest_idx]["raised_hands"] += 1
+                    hand_map[closest_idx]["total_hands"] += 1
+                    hand_map[closest_idx]["fist"] += int(is_fist(handLms))
+                    hand_map[closest_idx]["open"] += int(not is_fist(handLms))
+                    hand_map[closest_idx]["one_finger"] += int(count_raised_fingers(handLms) == 1)
+                    hand_map[closest_idx]["five_fingers"] += int(count_total_fingers(handLms) == 5)
+
             if is_rock_out(handLms):
                 rockout_count += 1
-
 
     if target_idx is None:
         for idx, data in hand_map.items():
@@ -207,16 +194,13 @@ while True:
             switch_candidate_idx = None
             switch_hold_frames = 0
 
-
-    # Check if both hands doing rock out
     if rockout_count >= 2:
         current_time = time.time()
         if current_time - last_rockout_time > rockout_cooldown and not is_playing:
             print("🎸 ROCK OUT detected! Playing music in background!")
             threading.Thread(target=play_song_background, daemon=True).start()
-            last_rockout_time = current_time  # update the last rockout time
-        rockout_count = 0  # reset after playing
-
+            last_rockout_time = current_time
+        rockout_count = 0
 
     if target_idx is not None and target_idx in hand_map and hand_map[target_idx]["five_fingers"] >= 2:
         print("🛑 Target reset by waving both hands")
@@ -225,32 +209,36 @@ while True:
         arduino.write(b'STOP\n')
 
     if target_idx is not None and target_idx in hand_map:
+        raised = hand_map[target_idx]["raised_hands"]
         fists = hand_map[target_idx]["fist"]
         opens = hand_map[target_idx]["open"]
 
-        if fists == 2:
-            if target_height >= close_threshold:
-                if last_command != "STOP":
-                    arduino.write(b'STOP\n')
-                    print("Sent: STOP (close to target)")
-                    last_command = "STOP"
-            else:
-                if offset_x < -50 and last_command != "LEFT":
-                    arduino.write(b'LEFT\n')
-                    print("Sent: LEFT")
-                    last_command = "LEFT"
-                elif offset_x > 50 and last_command != "RIGHT":
-                    arduino.write(b'RIGHT\n')
-                    print("Sent: RIGHT")
-                    last_command = "RIGHT"
-                elif abs(offset_x) <= 50 and last_command != "FORWARD":
-                    arduino.write(b'FORWARD\n')
-                    print("Sent: FORWARD")
-                    last_command = "FORWARD"
-        elif opens == 2 and last_command != "STOP":
-            arduino.write(b'STOP\n')
-            print("Sent: STOP")
-            last_command = "STOP"
+        if raised == 2:
+            if fists == 2:
+                if target_height >= close_threshold:
+                    if last_command != "STOP":
+                        arduino.write(b'STOP\n')
+                        print("Sent: STOP (close to target)")
+                        last_command = "STOP"
+                else:
+                    if offset_x < -50 and last_command != "LEFT":
+                        arduino.write(b'LEFT\n')
+                        print("Sent: LEFT")
+                        last_command = "LEFT"
+                    elif offset_x > 50 and last_command != "RIGHT":
+                        arduino.write(b'RIGHT\n')
+                        print("Sent: RIGHT")
+                        last_command = "RIGHT"
+                    elif abs(offset_x) <= 50 and last_command != "FORWARD":
+                        arduino.write(b'FORWARD\n')
+                        print("Sent: FORWARD")
+                        last_command = "FORWARD"
+            elif opens == 2 and last_command != "STOP":
+                arduino.write(b'STOP\n')
+                print("Sent: STOP")
+                last_command = "STOP"
+        else:
+            print("Hands not raised – maintaining current state.")
 
     if target_idx is not None and target_idx in hand_map:
         cv2.putText(frame,

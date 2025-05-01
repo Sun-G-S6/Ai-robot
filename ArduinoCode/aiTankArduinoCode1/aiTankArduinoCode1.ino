@@ -2,7 +2,7 @@
 #include "ApplicationFunctionSet_xxx0.cpp"
 
 DeviceDriverSet_Motor AppMotor;
-int speed = 200;
+int speed = 150;
 
 void setup() {
   Serial.begin(9600);
