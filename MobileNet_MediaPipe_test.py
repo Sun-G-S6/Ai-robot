@@ -3,7 +3,7 @@ import mediapipe as mp
 import serial
 import time
 import math
-from playsound import playsound
+import pygame
 import threading
 
 # ─────────────────────────────────────────────
@@ -61,11 +61,9 @@ def is_rock_out(hand_landmarks):
     pinky_up = is_up(20, 18)
     return index_up and pinky_up and middle_down and ring_down
 
-def play_song_background():
-    global is_playing
-    is_playing = True
-    playsound('/home/owen/aiTankProj/songs/womanizer.mp3')
-    is_playing = False
+pygame.mixer.init()
+pygame.mixer.music.load('/home/owen/aiTankProj/songs/laUltimaNoche.mp3')  # replace with your song
+
 
 # ─────────────────────────────────────────────
 # Globals
@@ -81,6 +79,10 @@ last_rockout_time = 0
 rockout_cooldown = 5
 close_threshold = 450
 is_playing = False
+rockout_hold_start = None
+rockout_gesture_active = False
+rockout_start_time = None  # Track when the rock out gesture started
+
 
 # ─────────────────────────────────────────────
 # Main loop
@@ -162,7 +164,20 @@ while True:
                     hand_map[closest_idx]["five_fingers"] += int(count_total_fingers(handLms) == 5)
 
             if is_rock_out(handLms):
-                rockout_count += 1
+                if rockout_start_time is None:
+                    rockout_start_time = time.time()
+                elif time.time() - rockout_start_time >= 2:
+                    if not pygame.mixer.music.get_busy():
+                        print("🎸 ROCK OUT detected – playing music!")
+                        pygame.mixer.music.play()
+                    else:
+                        print("🛑 ROCK OUT held – stopping music.")
+                        pygame.mixer.music.stop()
+                    rockout_start_time = None  # reset so it won't repeat
+                    break  # avoid double triggers from multiple hands
+            else:
+                rockout_start_time = None
+
 
     if target_idx is None:
         for idx, data in hand_map.items():
@@ -194,13 +209,7 @@ while True:
             switch_candidate_idx = None
             switch_hold_frames = 0
 
-    if rockout_count >= 2:
-        current_time = time.time()
-        if current_time - last_rockout_time > rockout_cooldown and not is_playing:
-            print("🎸 ROCK OUT detected! Playing music in background!")
-            threading.Thread(target=play_song_background, daemon=True).start()
-            last_rockout_time = current_time
-        rockout_count = 0
+ 
 
     if target_idx is not None and target_idx in hand_map and hand_map[target_idx]["five_fingers"] >= 2:
         print("🛑 Target reset by waving both hands")
