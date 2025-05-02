@@ -2,7 +2,9 @@
 #include "ApplicationFunctionSet_xxx0.cpp"
 
 DeviceDriverSet_Motor AppMotor;
-int speed = 150;
+int baseSpeed = 150;
+int leftSpeed = baseSpeed;
+int rightSpeed = 150;  // Calibrated for balance
 
 void setup() {
   Serial.begin(9600);
@@ -18,22 +20,22 @@ void loop() {
     Serial.println(command);
 
     if (command == "FORWARD") {
-      AppMotor.DeviceDriverSet_Motor_control(direction_just, speed,
-                                             direction_just, speed,
+      AppMotor.DeviceDriverSet_Motor_control(direction_just, leftSpeed,
+                                             direction_just, rightSpeed,
                                              control_enable);
     } else if (command == "STOP") {
       AppMotor.DeviceDriverSet_Motor_control(direction_void, 0,
                                              direction_void, 0,
                                              control_enable);
     } else if (command == "LEFT") {
-      // Turn in place left: left motor backward, right motor forward
-      AppMotor.DeviceDriverSet_Motor_control(direction_back, speed,
-                                             direction_just, speed,
+      // LEFT = left forward slow, right backward fast
+      AppMotor.DeviceDriverSet_Motor_control(direction_just, leftSpeed - 60,
+                                             direction_back, rightSpeed - 50,
                                              control_enable);
     } else if (command == "RIGHT") {
-      // Turn in place right: left motor forward, right motor backward
-      AppMotor.DeviceDriverSet_Motor_control(direction_just, speed,
-                                             direction_back, speed,
+      // RIGHT = left backward fast, right forward slow
+      AppMotor.DeviceDriverSet_Motor_control(direction_back, leftSpeed - 50,
+                                             direction_just, rightSpeed - 60,
                                              control_enable);
     }
   }
