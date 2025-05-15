@@ -5,6 +5,7 @@ import time
 import math
 import pygame
 import threading
+import keyboard
 
 # ─────────────────────────────────────────────
 # Serial communication with Arduino
@@ -63,8 +64,25 @@ def is_rock_out(hand_landmarks):
     pinky_up = is_up(20, 18)
     return index_up and pinky_up and middle_down and ring_down
 
+def dance_motion_loop():
+    global last_command
+    while pygame.mixer.music.get_busy():
+        arduino.write(b'FORWARD\n')
+        print("🎵 Moving FORWARD (rock out mode)")
+        last_command = "FORWARD"
+        time.sleep(1)
+        arduino.write(b'BACKWARD\n')
+        print("🎵 Moving BACKWARD (rock out mode)")
+        last_command = "BACKWARD"
+        time.sleep(1)
+    # Stop motors once music ends
+    arduino.write(b'STOP\n')
+    print("🎵 Music stopped — robot stopped")
+    last_command = "STOP"
+
+
 pygame.mixer.init()
-pygame.mixer.music.load('/home/owen/aiTankProj/songs/laUltimaNoche.mp3')  # replace with your song
+pygame.mixer.music.load('/home/owen/aiTankProj/songs/again.mp3')  # replace with your song
 
 
 # ─────────────────────────────────────────────
@@ -84,6 +102,12 @@ is_playing = False
 rockout_hold_start = None
 rockout_gesture_active = False
 rockout_start_time = None  # Track when the rock out gesture started
+babysitting_mode = False
+babysitting_hold_start = None
+alert_channel = None
+alert_sound = pygame.mixer.Sound('/home/owen/aiTankProj/songs/alert-sound.mp3')  
+person_detected_last = True
+
 
 
 # ─────────────────────────────────────────────
@@ -112,10 +136,24 @@ while True:
                 person_boxes.append((startX, startY, endX, endY))
 
     if len(person_boxes) == 0:
-        print("👋 Everyone left the frame — resetting target")
+        print("👋 No people detected in frame")
+
+        if babysitting_mode and person_detected_last:
+            print("🔊 Playing alert sound (babysitting mode active)")
+            alert_channel = alert_sound.play(-1)  # -1 = loop forever
+            person_detected_last = False
+
         target_idx = None
         last_command = "STOP"
         arduino.write(b'STOP\n')
+    else:
+        if babysitting_mode and not person_detected_last:
+            print("🙋 Person returned — stopping alert")
+            if alert_channel is not None:
+                alert_channel.stop()
+                alert_channel = None
+            person_detected_last = True
+
 
     for idx, (startX, startY, endX, endY) in enumerate(person_boxes):
         label = f"Person {idx + 1}"
@@ -147,7 +185,8 @@ while True:
             if x1 < nose_x < x2 and y1 < nose_y < y2:
                 cv2.putText(frame, "Pose confirmed", (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
                 break
-
+    
+    #Loop to detect hand signs
     results = hands.process(frame_rgb)
     if results.multi_hand_landmarks:
         for handLms in results.multi_hand_landmarks:
@@ -183,13 +222,33 @@ while True:
                     if not pygame.mixer.music.get_busy():
                         print("🎸 ROCK OUT detected – playing music!")
                         pygame.mixer.music.play()
+                        threading.Thread(target=dance_motion_loop, daemon=True).start()
                     else:
-                        print("🛑 ROCK OUT held – stopping music.")
+                        print("🛑 ROCK OUT held – stopping music and motion.")
                         pygame.mixer.music.stop()
-                    rockout_start_time = None  # reset so it won't repeat
-                    break  # avoid double triggers from multiple hands
+                    rockout_start_time = None
+                    break
             else:
                 rockout_start_time = None
+
+
+            # ⬇️ Babysitting mode toggle with 4 fingers
+            if count_total_fingers(handLms) == 4:
+                if babysitting_hold_start is None:
+                    babysitting_hold_start = time.time()
+                elif time.time() - babysitting_hold_start >= 4:
+                    if not babysitting_mode:
+                        babysitting_mode = True
+                        print("👶 Entering babysitting mode")
+                        pygame.mixer.Sound('/home/owen/aiTankProj/songs/enterBaby.mp3').play()
+                    else:
+                        babysitting_mode = False
+                        print("👋 Leaving babysitting mode")
+                        pygame.mixer.Sound('/home/owen/aiTankProj/songs/exitBaby.mp3').play()
+                    babysitting_hold_start = None  # reset after toggling
+                    break  # only respond to one toggle at a time
+            else:
+                babysitting_hold_start = None  # reset if 4 fingers not held continuously
 
 
     if target_idx is None:
@@ -274,6 +333,8 @@ while True:
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
+arduino.write(b'STOP\n')  # <- Safely stop the motors on exit
+print("Shutting down. Goodbye!")
 cap.release()
 arduino.close()
 cv2.destroyAllWindows()

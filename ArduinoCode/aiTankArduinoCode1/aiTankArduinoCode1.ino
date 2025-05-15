@@ -38,5 +38,12 @@ void loop() {
                                              direction_just, rightSpeed - 60,
                                              control_enable);
     }
+
+    else if (command == "BACKWARD") {
+      AppMotor.DeviceDriverSet_Motor_control(direction_back, baseSpeed,
+                                             direction_back, baseSpeed,
+                                             control_enable);
+    }
+    
   }
 }
